@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>VRChat OSC Web Interface</title>
+    <style type="text/css">
+        html {
+            background-color: black;
+            color: white;
+        }
+
+        #status {
+            width: max-content;
+            padding: 10px;
+        }
+
+        #chatlog {
+            overflow: scroll;
+            overflow-x: hidden;
+            height: 50px;
+        }
+
+        .sentmsg {
+            width: max-content;
+            color: green;
+        }
+
+        .unsentmsg {
+            width: max-content;
+            color: orange;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="status">Not connected yet</div>
+    <div id="chat">
+        <textarea id="chatbox" maxlength="144"></textarea>
+        <div id="chatlog"></div>
+    </div>
+    <div id="control"><textarea id="controlbox"></textarea></div>
+    <div id="name">No avatar loaded</div>
+    <div id="config">
+        VRControls <input type="checkbox" onclick="invr = event.target.checked" />
+        PrintOut <input type="checkbox" onclick="printout = event.target.checked" />
+        PrintIn <input type="checkbox" onclick="printin = event.target.checked" />
+    </div>
+    <div id="parameters">
+        <div class="param">Switch avatar to load the controls</div>
+    </div>
+    <script src="https://ajax.googleapis.com/ajax/libs/d3js/7.8.5/d3.min.js"></script>
+    <script>
+        function wsconnect() {
+            ws = new WebSocket(`ws://${location.host}/ws`);
+            ws.onmessage = onMessage;
+            ws.onclose = function (d) {
+                console.log("Connection lost");
+                if (tryconnecting) {
+                    setTimeout(wsconnect, backoff * 1000);
+                }
+                ws.onclose = null;
+                setconstate(false)
+            };
+            ws.onerror = function (d) {
+                backoff = backoff * 2;
+                if (backoff > 128) {
+                    backoff = 128;
+                }
+                console.log(`Error: Retrying in ${backoff}`);
+            };
+            ws.onopen = function (d) {
+                console.log(`Connected`);
+                backoff = 1;
+                setconstate(true)
+            };
+            console.log('Connecting');
+        }
+        function nametoparam(name) {
+            return name.replaceAll(' ', '_')
+        }
+        function nametocss(name) {
+            return 'param_' + nametoparam(name).replaceAll('/', '_')
+        }
+        function paramChangeValue(param, value, changebar = false) {
+            var a = d3.select('#' + nametocss(param))
+            var b = a.select('.value').text(value)
+            if (value === true) {
+                b.style('color', 'green')
+            } else if (value === false) {
+                b.style('color', 'red')
+            }
+            if (changebar) {
+                if (typemap[param] === 'Float') {
+                    value = ((value * 255) / 2) + 127.5
+                }
+                a.select('.control').property('value', value)
+            }
+            // TODO: Add if not exists
+        }
+        function onParamChanged(param, value) {
+            paramChangeValue(param, value, true)
+        }
+        function changeInt(param, value) {
+            paramChangeValue(param, value)
+            sendparam(param, value)
+        }
+        function changeFloat(param, value) {
+            paramChangeValue(param, value)
+            sendparam(param, value)
+        }
+        function changeBool(param, value) {
+            paramChangeValue(param, value)
+            sendparam(param, value)
+        }
+        async function onAvatarChange(avatar) {
+            d3.select('#parameters').selectAll('.param').remove()
+            var para = d3.select('#parameters').selectAll('.param')
+            var paradata = await d3.json(`/avatar/${avatar}`)
+            d3.select('#name').text(paradata.name)
+            typemap = {}
+            for (var parm of paradata.parameters) {
+                typemap[parm.name] = nametoparam(parm.output.type)
+            }
+            console.log(`Avatar name: ${paradata.name}`)
+            var dat = para.data(paradata.parameters)
+            var ent = dat.enter()
+            var e = ent.append('div').classed('param', true)
+                .attr('id', (d) => nametocss(d.name))
+
+            function handle(data, num) {
+                var sel = d3.select(this)
+                var type = data.output.type
+                var name = data.name
+                if (type === 'Float' || type === 'Int') {
+                    var i = sel.append('input')
+                        .attr('disabled', (d) => ('input' in d) ? undefined : 1)
+                        .classed('control', true)
+                        .attr('type', 'range')
+                        .attr('min', 0)
+                        .attr('max', 255)
+                        .attr('step', 1)
+
+                    if (type === 'Int') {
+                        i.on('change', function (e) {
+                            changeInt(name, d3.select(this.parentElement).select('.control').property('value'))
+                        })
+                            .attr('value', 0)
+                    } else {
+                        i.on('change', function (e) {
+                            changeFloat(name, ((d3.select(this.parentElement).select('.control').property('value') / 255) * 2) - 1)
+                        })
+                            .attr('value', 127)
+                    }
+                    i.on('mousedown', function (e, d, b) {
+                        var type = d.output.type
+                        slidertimer = setInterval(() => {
+                            var val = e.target.value
+                            if (val === lastsliderval) return;
+                            lastsliderval = val
+                            if (type === 'Float') {
+                                val = ((val / 255) * 2) - 1
+                                changeFloat(d.name, val)
+                            } else {
+                                changeInt(d.name, val)
+                            }
+                        }, 50);
+                    })
+                        .on('mouseup', function () {
+                            clearInterval(slidertimer)
+                        })
+                } else if (type == 'Bool' && data.input) {
+                    sel.append('button')
+                        .classed('button', true)
+                        .text('Butt')
+                        .on('keydown mousedown', () => changeBool(name, true))
+                        .on('click', () => changeBool(name, false))
+                        .style('color', 'maroon')
+
+                    sel.append('button')
+                        .classed('button', true)
+                        .text('On')
+                        .on('click', () => changeBool(name, true))
+                        .style('color', 'green')
+
+                    sel.append('button')
+                        .classed('button', true)
+                        .text('Off')
+                        .on('click', () => changeBool(name, false))
+                        .style('color', 'red')
+                }
+            }
+            e.each(handle)
+            e.append('span').text((d) => ` ${d.output.type} ${d.name} `)
+            var v = e.append('span').classed('value', true).text('unknown').style('color', 'yellow')
+        }
+        function onMessage(e) {
+            var j = JSON.parse(e.data)
+            if (j.addr === '/avatar/change') {
+                console.log(`Avatar changed to: ${j.msg}`)
+                onAvatarChange(j.msg)
+            } else if (j.addr.search('/avatar/parameters/') === 0) {
+                var parm = j.addr.split('/avatar/parameters/')[1]
+                if (printin)
+                    console.log(`In: ${parm} ${j.msg}`)
+                onParamChanged(parm, j.msg)
+            } else {
+                console.log(`Unknown message ${j.addr} ${j.msg}`)
+            }
+        }
+        function send(addr, msg) {
+            if (printout) console.log(`Out: ${addr} ${msg}`)
+            ws.send(JSON.stringify({ addr: addr, msg: msg }))
+        }
+        function sendinput(addr, val) {
+            send(`/input/${addr}`, val)
+        }
+        function sendparam(param, val) {
+            send(`/avatar/parameters/${param.replaceAll(' ', '_')}`, val)
+        }
+        function sendchat(msg, var1 = true, var2 = true) {
+            send('/chatbox/input', [msg, var1, var2])
+        }
+        function logclick(l) {
+            var cur = getchatboxtext()
+            if (cur) {
+                appendchatlog(cur, false)
+                clearchatbox()
+            }
+            if (!l) return;
+            setchatboxtext(l.property('textContent'))
+            if (l.classed('unsentmsg')) {
+                l.remove()
+            }
+        }
+        function getchatbox() {
+            return d3.select('#chatbox')
+        }
+        function getchatboxtext() {
+            return getchatbox().property('value').trim()
+        }
+        function setchatboxtext(txt) {
+            getchatbox().property('value', txt)
+        }
+        function clearchatbox() {
+            getchatbox().property('value', '')
+        }
+        function appendchatlog(text, sent = true) {
+            var l = d3.select('#chatlog')
+                .insert('div', 'div')
+                .text(text)
+                .classed('sentmsg', sent)
+                .classed('unsentmsg', !sent);
+            l.on('click', (d) => l.call(logclick))
+        }
+        function procchat() {
+            var txt = getchatboxtext()
+            if (!txt.length || !wsiscon) return;
+            sendchat(txt)
+            clearchatbox()
+            appendchatlog(txt)
+        }
+        function listenkeyschat(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault()
+                procchat()
+            }
+        }
+        function listenkeysbox(event, state) {
+            if (event.key === 'Tab') return;
+            event.preventDefault()
+            var kn = event.key;
+            if (kn.length === 1) kn = kn.toLowerCase()
+            if (keysdown[kn] === state) return;
+            keysdown[kn] = state;
+            if (invr) {
+                look = vrcontrols[kn] || controls[kn]
+            } else {
+                look = controls[kn]
+            }
+            if (!look) return;
+            var target = 1;
+            sendinput(look, state ? target : 0)
+        }
+        function setconstate(state) {
+            wsiscon = state;
+            var sta = d3.select("#status")
+            if (state) {
+                sta.style('background-color', 'green').text('Online')
+            } else {
+                sta.style('background-color', 'red').text('Offline')
+            }
+        }
+
+        var wsiscon = false,
+            backoff = 1,
+            ws = null,
+            tryconnecting = true,
+            invr = false,
+            printout = false,
+            printin = false,
+            keysdown = {},
+            slidertimer = null,
+            lastsliderval = null,
+            skipnext = null,
+            typemap = {},
+            controls = {
+                a: 'LookLeft',
+                d: 'LookRight',
+                w: 'MoveForward',
+                s: 'MoveBackward',
+                ArrowLeft: 'LookLeft',
+                ArrowRight: 'LookRight',
+                ArrowUp: 'MoveForward',
+                ArrowDown: 'MoveBackward',
+                q: 'MoveLeft',
+                e: 'MoveRight',
+                Shift: 'Run',
+                ' ': 'Jump',
+            },
+            vrcontrols = {
+                a: 'ComfortLeft',
+                d: 'ComfortRight',
+                ArrowLeft: 'ComfortLeft',
+                ArrowRight: 'ComfortRight',
+            }
+
+        d3.select('#chatbox')
+            .on('keydown', listenkeyschat)
+            .property('value', 'Write text here and press enter to chat')
+        d3.select("#controlbox")
+            .on('keydown', (d) => listenkeysbox(d, 1))
+            .on('keyup', (d) => listenkeysbox(d, 0))
+            .property('value', 'Place cursor here for control with keyboard')
+        d3.select('#config')
+            .selectAll('input[type=checkbox]')
+            .dispatch('click')
+
+        wsconnect()
+    </script>
+</body>
+
+</html>
