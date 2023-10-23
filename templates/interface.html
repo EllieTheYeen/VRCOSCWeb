@@ -35,10 +35,12 @@
 <body>
     <div id="status">Not connected yet</div>
     <div id="chat">
-        <textarea id="chatbox" maxlength="144"></textarea>
+        <textarea id="chatbox" maxlength="144" placeholder="Write text here and press enter to chat"></textarea>
         <div id="chatlog"></div>
     </div>
-    <div id="control"><textarea id="controlbox"></textarea></div>
+    <div id="control">
+        <textarea id="controlbox" placeholder="Place cursor here for control with keyboard WASD"></textarea>
+    </div>
     <div id="name">No avatar loaded</div>
     <div id="config">
         VRControls <input type="checkbox" onclick="invr = event.target.checked" />
@@ -326,11 +328,9 @@
 
         d3.select('#chatbox')
             .on('keydown', listenkeyschat)
-            .property('value', 'Write text here and press enter to chat')
         d3.select("#controlbox")
             .on('keydown', (d) => listenkeysbox(d, 1))
             .on('keyup', (d) => listenkeysbox(d, 0))
-            .property('value', 'Place cursor here for control with keyboard')
         d3.select('#config')
             .selectAll('input[type=checkbox]')
             .dispatch('click')

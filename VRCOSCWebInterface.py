@@ -114,7 +114,7 @@ if __name__ == "__main__":
     try:
         import coloredlogs
 
-        print("Found coloredlogs. Installing", file=sys.stderr)
+        print("Found coloredlogs. Using", file=sys.stderr)
         coloredlogs.install(logging.DEBUG)
     except Exception:
         pass
