@@ -1,0 +1,1 @@
+This is a web interface to VRChat through OSC (Open Sound Control) that lets you control parameters and also move your avatar (Using keyboard). It is what I use to debug my avatars. It will load all the avatar parameters up when you switch avatar and let you see them as they get changed ingame
